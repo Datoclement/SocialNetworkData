@@ -1,4 +1,4 @@
-relation.o: relation.cpp
+relation.o: relation.cpp relation.hpp
 	g++ -c relation.cpp
 
 relation_test.o: relation_test.cpp relation.hpp
