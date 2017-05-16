@@ -1,3 +1,4 @@
 *.o
 *.gch
 *.txt
+*_test

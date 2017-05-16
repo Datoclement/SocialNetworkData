@@ -7,18 +7,12 @@ using namespace std;
 
 int main(int argc,char** argv){
 
-    string id(argv[1]);
-    relation r(id);
-    // vector<int> perm(2,0);
-    // perm[0]=1;
-    // r.sort(perm);
-    // cout << r << endl;
-    // r.random_seed(0);
-    // for(int i=0;i<10;i++){
-    //     vector<int> cur = r.random();
-    //     for(int j=0;j<2;j++){
-    //         cout << cur[j] << ' ';
-    //     }
-    //     cout << endl;
-    // }
+    string id("facebook");
+    vector<relation> rs(2,*new relation(id));
+    vector<string> ps(2);
+    ps[0] = "(x,y)";
+    ps[1] = "(y,z)";
+    // ps[2] = "(z,x)";
+    relation r = relation::join(rs,ps);
+    r.save("test.txt");
 }
