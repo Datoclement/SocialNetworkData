@@ -1,5 +1,6 @@
 CC=mpic++
 
+NP?=256
 # CC=g++
 
 relation.o: relation.cpp relation.hpp makefile
@@ -12,7 +13,13 @@ test: relation.o relation_test.o
 	$(CC) $^ -o $@
 
 run: test
-	mpirun -np 2 ./test
+
+	mpirun -np $(NP) ./test
 
 clear:
 	rm *.o
+
+salloc:
+	make clear
+	make test
+	salloc -n $(NP) mpirun ./test

@@ -11,21 +11,20 @@ class relation {
 
 private:
 
-    //identifier
-    string id;
-
     //arity, numbers of subsets that satisfy this relation
     int arity,memsize;
 
     //list of such subsets
-    vector<vector<int> > members;
+    // vector<vector<int> > members;
+    int* members;
 
     //private comparator used in sorting function
     struct cmp{
         vector<int> permutation;
         cmp(int arity);
         cmp(vector<int> _perm);
-        bool operator()(vector<int> a,vector<int> b)const;
+        // bool operator()(vector<int> a,vector<int> b)const;
+        bool operator()(int* a,int* b)const;
     };
 
     /**
@@ -51,6 +50,7 @@ private:
         //constructor from a string
         pattern(string pat);
 
+        //constructor from component
         pattern(vector<string> newvars,map<string,vector<int> > newpositions);
 
         //output stream
@@ -63,6 +63,9 @@ private:
         */
         static vector<string> find_comm(pattern pat1,pattern pat2);
 
+        /**
+            find all commun variables that exist in more than 1 patterns
+        */
         static vector<string> find_comm(vector<pattern> pats);
 
         /**
@@ -72,27 +75,74 @@ private:
         */
         static vector<vector<int> > find_perm(pattern pat1,pattern pat2);
 
-
+        /**
+            find the result of pattern join
+        */
         static pattern join(pattern pat1,pattern pat2);
     };
 
-    class cubehash{
+    /**
+        a class that represents the complex hash function used in hypercube join
+    */
+    class hash_hc{
 
     private:
+
+        /**
+            mod number for each variable
+            ordered according to the order in comm vector
+        */
         vector<int> ms;
 
+        /**
+            the commun variables positions in corresponding pattern
+            if it does not exist in the pattern, worth -1
+            ordered by comm vector
+        */
         vector<int> varspos;
 
+        /**
+            the corresponding group of processors when the hash value is given
+        */
         vector<vector<int> >values;
 
     public:
-        cubehash(vector<int>ms,vector<string>&comm,relation::pattern pat);
 
-        vector<int>& get_value(vector<int>& v);
+        /**
+            do three things:
+            1. note down ms
+            2. fill the table varspos in looking into comm and pat
+            3. compute all groups of processors for each hash value
+            @param ms  : mod numbers
+            @param comm: commun variables of the group of studied pattern
+            @param pat : the pattern for which we are constructing this hash class
+        */
+        hash_hc(vector<int>ms,vector<string>&comm,relation::pattern pat);
+
+        /**
+            compute the hash value of v, then given a list of processors
+            that should receive it.
+        */
+        vector<int>& get_value(int* v);
     };
 
-    //contructor with a given set of relations of the same arity
-    relation(vector<vector<int> >& _mem);
+    class hash_itf{
+
+    private:
+        int sz,r,pos;
+
+    public:
+        hash_itf(int _sz);
+
+        void set_pos(int _pos);
+
+        void evolve();
+
+        int get_value(int* key);
+    };
+
+    //contructor with known components
+    relation(int* _mem,int arity,int memsize);
 
     /**
         find relations that comply to the given pattern
@@ -102,6 +152,13 @@ private:
     pair<relation,pattern> filter(pattern pat);
 
     /**
+        compare two tuples of different length with given permutations
+        @param  l: compare first l elements after permutation
+        @return  : 1 if a is lexicographically greater, -1 if less, 0 if equal
+    */
+    static int cmpf(int* a,int* b,int l,vector<int>& permutation_a,vector<int>& permutation_b);
+
+    /**
         join two relations according to the given patterns
         @param  r1,r2    : relations
         @param  pat1,pat2: patterns
@@ -109,24 +166,57 @@ private:
     */
     static relation& join(relation& r1, relation& r2, pattern pat1,pattern pat2);
 
+    /**
+        join several relations according to the given patterns
+        implemented with a loop re-using simple 2-join
+    */
     static relation& join(vector<relation>& rs,vector<pattern>& pats);
 
     /**
         join two relations according to the given patterns
+        implemented with naive algorithm with mpi
     */
-    static relation& join_mpi_hash(relation& r1, relation& r2, pattern p1, pattern p2, hashtype* hash);
+    static relation& join_mpi(relation& r1, relation& r2, pattern p1, pattern p2);
 
-    static relation& merge_vector_to_relation(vector<vector<int> >&mems, int dest);
+    /**
+        join several relations
+        implemented with instant-transfer join algorithm
+    */
+    static relation& join_itf(vector<relation>& rs, vector<pattern>& pats, int root);
 
-    // static vector<vector<int> >& distribute(vector<vector<int> >&mems,int source,int pos);
-    static vector<vector<int> >& distribute(vector<vector<int> >&mems,int pos);
+    /**
+        join several relations
+        implemented with hypercube join algorithm
+    */
+    static relation& join_hc(vector<relation>& rs, vector<pattern>& pats, int root);
 
+    /**
+        merge result from different machines
+        @param  r   : local result
+        @param  dest: destination of merge
+        @return     : empty for non destination, merged result for destination
+    */
+    static relation& merge(relation& r,int dest);
 
-    static vector<vector<int> >& distribute_cube(vector<vector<int> >&mems,int source,cubehash chb);
+    /**
+        distribute intermedium result to corresponding processors
+        essence of instant-transfer algorithm
+        using MPI_Alltoall
+        @param pos: pivot position that is taken into the hash function
+    */
+    static relation& distribute_itf(relation& r,hash_itf ith);
 
-    static relation& join_mpi(vector<relation>& rs, vector<pattern>& pats, int root);
+    /**
+        distribute the raw data to corresponding processors
+        essence of hypercube algorithm
+        using MPI_Scatterv
+        @param root: the root machine that has access to the raw data
+        @param cbh : hash class (tuple->int)
+    */
+    static relation& distribute_hc(relation& r,int root,hash_hc cbh);
 
-    static relation& join_hypercube(vector<relation>& rs, vector<pattern>& pats, int root);
+    static relation& distribute_loc(relation& r,hash_itf ith);
+    static relation& distribute_hc_loc(relation&r,hash_hc cbh);
 
 public:
 
@@ -140,8 +230,10 @@ public:
     relation(string str);
 
     //output stream functions
-    friend ostream& operator<<(ostream& out, const relation& rel);
+    friend ostream& operator<<(ostream& out, relation& rel);
     friend ostream& operator<<(ostream& out,relation::pattern& pat);
+
+    int* get(int id);
 
     //sort the members by built-in comparator of vector class
     void sort();
@@ -149,11 +241,14 @@ public:
     //sort the members with a given permutation
     void sort(const vector<int>& permutation);
 
+    void sort(cmp f);
+
     //seeding of the random number generator
     void random_seed(int seed);
 
     //return a random member
-    vector<int> random();
+    // vector<int> random();
+    int* random();
 
     //save the relation into the given path
     void save(string filename);
@@ -161,15 +256,16 @@ public:
     //join two relations with two strings that correspond to a pattern
     static relation& join(relation& r1, relation& r2, string patstr1, string patstr2);
 
-    //join two relations using mpi
-    static relation& join_mpi(relation& r1, relation& r2, string patstr1, string patstr2);
-
     //join several relations with strings that correspond to a pattern
     static relation& join(vector<relation>& rs,vector<string>& patstrs);
 
-    //join several relations using mpi with strings that correspond to a pattern
-    static relation& join_mpi(vector<relation>& rs,vector<string>& patstrs);
+    //join two relations with mpi
+    static relation& join_mpi(relation& r1, relation& r2, string patstr1, string patstr2);
 
-    static relation& join_hypercube(vector<relation>& rs, vector<string>& pats);
+    //join several relations with itf algo
+    static relation& join_itf(vector<relation>& rs,vector<string>& patstrs);
+
+    //join several relation with hc algo
+    static relation& join_hc(vector<relation>& rs, vector<string>& pats);
 
 };
