@@ -7,6 +7,7 @@
 #include <map>
 #include <iterator>
 #include <utility>
+#include <ctime>
 
 #include "mpi.h"
 
@@ -726,7 +727,7 @@ relation& relation::merge_vector_to_relation(vector<vector<int> >&mems,int root)
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
 
-    cout << rank << " merging..." << endl;
+    // cout << rank << " merging..." << endl;
     int len=mems.size();
     int ar=0;if(mems.size()>0)ar=mems[0].size();
     int* lenv=new int[size];
@@ -776,7 +777,7 @@ relation& relation::merge_vector_to_relation(vector<vector<int> >&mems,int root)
     delete [] data;
     delete [] displ;
 
-    cout << rank << " through gather" << endl;
+    // cout << rank << " through gather" << endl;
 
     if(rank!=root) {
         return *new relation();
@@ -828,21 +829,20 @@ relation& relation::join_mpi(vector<relation>& rs,vector<pattern>& pats,int root
     int rank,size;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
-    // if(rank==root){
-    //     cout << rank << " instant transfer joining..." << endl;
-    //     cout << rank << " dealing with " << endl;
-    //     print_array1d(rs);
-    // }
+
     bool quick_return=false;
     if(rank==root&&rs.size()==0){
         quick_return=true;
         MPI_Bcast(&quick_return,1,MPI_INT,root,MPI_COMM_WORLD);
     }
     if(quick_return)return *new relation();
-    if(rank==root)cout << rank << " instant transfer joining..." << endl;
+    // if(rank==root)cout << rank << " instant transfer joining..." << endl;
     pair<relation,relation::pattern> p=rs[0].filter(pats[0]);
     vector<vector<int> >* currel=(rank==root?&p.first.members:new vector<vector<int> >());
     pattern curpat=p.second;
+
+    double dt=0,jt=0,mt=0;
+
     for(int i=1;i<rs.size();i++){
         pair<relation,relation::pattern> p=rs[i].filter(pats[i]);
         vector<string> comm=pattern::find_comm(curpat,p.second);
@@ -852,10 +852,13 @@ relation& relation::join_mpi(vector<relation>& rs,vector<pattern>& pats,int root
 
         vector<vector<int> >&nextrel=(rank==root?p.first.members:*new vector<vector<int> >());
 
+        const clock_t s1=clock();
         vector<vector<int> >&currel_local=distribute(*currel,pos1);
         vector<vector<int> >&next_local=distribute(nextrel,pos2);
         // vector<vector<int> >&currel_local=*new vector<vector<int> >();
         // vector<vector<int> >&next_local=*new vector<vector<int> >();
+        const clock_t t1=clock();
+        dt+=(t1-s1)/(double)CLOCKS_PER_SEC;
 
         //
         //
@@ -868,16 +871,24 @@ relation& relation::join_mpi(vector<relation>& rs,vector<pattern>& pats,int root
         //     next_local.insert(next_local.end(),tmp2.begin(),tmp2.end());
         //
         // }
+        const clock_t s2=clock();
         *currel=join(*new relation(currel_local),*new relation(next_local),curpat,pats[i]).members;
-        cout << rank << " get result size " << currel->size()
-                << " for " << root << " in " << i << "-th round..." << endl;
+        const clock_t t2=clock();
+        jt+=(t2-s2)/(double)CLOCKS_PER_SEC;
+        // cout << rank << " get result size " << currel->size()
+                // << " for " << root << " in " << i << "-th round..." << endl;
         curpat=relation::pattern::join(curpat,p.second);
     }
-    cout << rank << " entering the merge function..." << endl;
+    const clock_t s3=clock();
+    // cout << rank << " entering the merge function..." << endl;
     relation& res=merge_vector_to_relation(*currel,root);
     // if(rank==root)cout << root << " get partial result " << res << endl;
-    if(rank==root)cout << rank << " instant transfer join finished." << endl;
-
+    // if(rank==root)cout << rank << " instant transfer join finished." << endl;
+    const clock_t t3=clock();
+    mt+=(t3-s3)/(double)CLOCKS_PER_SEC;
+    if(rank==root)cout << " itf distribute time: " << dt << endl;
+    if(rank==root)cout << " itf join time: " << jt << endl;
+    if(rank==root)cout << " itf merge time: " << mt << endl;
     return res;
 }
 
@@ -924,7 +935,7 @@ relation& relation::join_hypercube(vector<relation>&rs,vector<pattern>& pats,int
     int rank,size;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
-    cout << rank << " begin..." << endl;
+    // cout << rank << " begin..." << endl;
 
     vector<string> comms=pattern::find_comm(pats);
     vector<int> ms=get_distribution(size,comms.size());
@@ -940,35 +951,43 @@ relation& relation::join_hypercube(vector<relation>&rs,vector<pattern>& pats,int
     }
     vector<relation>& rs_loc=*new vector<relation>();
 
+    const clock_t s1=clock();
     for(int i=0;i<rs.size();i++){
         // cout << rank << " hypercube-distributing " << i << " ..." << endl;
         // cout << rank << " " << rs[0].memsize << " ..." << endl;
         rs_loc.push_back(*new relation(distribute_cube(rs[i].members,root,cbh[i])));
     }
-
+    const clock_t t1=clock();
+    if(rank==root)cout << " hc distribute time: " << (t1-s1)/(double)CLOCKS_PER_SEC << endl;
     // cout << rank << " finish hypercube-distribution." << endl;
     vector<vector<int> > res_loc;
 
     //hypeflag
-
+    const clock_t s2=clock();
     #ifdef POST_TRANSFER
         // using instant tranfer for each step
-        cout << rank << " instant-transfer-joining..." << endl;
+        // cout << rank << " instant-transfer-joining..." << endl;
         for(int i=0;i<size;i++){
             relation& tmp=join_mpi(rs_loc,pats,i);
             res_loc.insert(res_loc.end(),tmp.members.begin(),tmp.members.end());
         }
     #else
         //naive join
-        cout << rank << " local joining..." << endl;
+        // cout << rank << " local joining..." << endl;
         res_loc=(join(rs_loc,pats)).members;
     #endif
+    const clock_t t2=clock();
+    if(rank==root)cout << " hc join time: " << (t2-s2)/(double)CLOCKS_PER_SEC << endl;
 
-    cout << rank << " get result size " << res_loc.size() << endl;
+    // cout << rank << " get result size " << res_loc.size() << endl;
 
-    cout << rank << " enters the merging function..." << endl;
-    return merge_vector_to_relation(res_loc,root);
+    // cout << rank << " enters the merging function..." << endl;
+    const clock_t s3=clock();
+    relation& res=merge_vector_to_relation(res_loc,root);
+    const clock_t t3=clock();
+    if(rank==root)cout << " hc merge time: " << (t3-s3)/(double)CLOCKS_PER_SEC << endl;
 
+    return res;
 
 }
 

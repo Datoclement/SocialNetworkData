@@ -16,7 +16,7 @@ int main(int argc,char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
 
     if(true){
-            string source("facebook");
+            string source("dblp");
             relation &r1=*new relation(source);
             relation &r2=r1,&r3=r1;
             // if(rank==root){
@@ -28,7 +28,7 @@ int main(int argc,char** argv){
         vector<string> strs;strs.push_back("(x,y)");strs.push_back("(y,z)");strs.push_back("(z,x)");
 
         const clock_t t11 = clock();
-        if(rank==root) cout << rank << " hc algo..." << endl;
+        if(rank==root) cout << " hc algo..." << endl;
         relation r = relation::join_hypercube(rs,strs);
         const clock_t t12 = clock();
         // r.sort();
@@ -36,7 +36,7 @@ int main(int argc,char** argv){
         const clock_t t13 = clock();
 
         const clock_t t21 = clock();
-        if(rank==root) cout << " if algo..." << endl;
+        if(rank==root) cout << " itf algo..." << endl;
         relation _r = relation::join_mpi(rs,strs);
         const clock_t t22 = clock();
         // _r.sort();
