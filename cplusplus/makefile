@@ -1,8 +1,18 @@
-relation.o: relation.cpp relation.hpp
-	g++ -c relation.cpp
+CC=mpic++
 
-relation_test.o: relation_test.cpp relation.hpp
-	g++ relation.hpp -c relation_test.cpp
+# CC=g++
 
-relation_test: relation_test.o relation.o
-	g++ relation.o relation_test.o -o relation_test
+relation.o: relation.cpp relation.hpp makefile
+	$(CC) -c $< -o $@
+
+relation_test.o: relation_test.cpp
+	$(CC) -c $< -o $@
+
+test: relation.o relation_test.o
+	$(CC) $^ -o $@
+
+run: test
+	mpirun -np 2 ./test
+
+clear:
+	rm *.o
