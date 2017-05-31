@@ -321,11 +321,13 @@ int relation::cmpf(int* a,int* b,int l,vector<int>& perma,vector<int>& permb){
     return 0;
 }
 relation& relation::merge(relation& r,int root){
+
     int rank,size;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
 
-    // cout << rank << " merging..." << endl;
+    // cout << rank << " get result size " << r.memsize << endl;
+
     int sz=r.memsize;
     int ar=r.arity;
     int* szv=new int[size];
@@ -363,7 +365,11 @@ relation& relation::merge(relation& r,int root){
     }
     // cout << rank << " waits for gather" << endl;
 
+    const clock_t s = clock();
     MPI_Gatherv(r.members,sz*ar,MPI_INT,res_vect,szv,displ,MPI_INT,root,MPI_COMM_WORLD);
+    const clock_t t = clock();
+    if(rank==root) cout << "\tgthv:\t" << (t-s)/(double)CLOCKS_PER_SEC << endl;
+
     delete [] szv;
     delete [] arv;
     delete [] displ;
@@ -412,6 +418,7 @@ relation& relation::distribute_itf(relation& r,hash_itf ith){
     rdis[0]=0;
     for(int i=1;i<size;i++)rdis[i]=rdis[i-1]+rlen[i-1];
 
+
     //slim data
     int* ipos=new int[size];
     for(int i=0;i<size;i++)ipos[i]=0;
@@ -426,9 +433,12 @@ relation& relation::distribute_itf(relation& r,hash_itf ith){
     }
     delete [] ipos;
 
+    const clock_t s = clock();
     int ttl=rlen[size-1]+rdis[size-1];
     int* collect=new int[ttl];
     MPI_Alltoallv(data,slen,sdis,MPI_INT,collect,rlen,rdis,MPI_INT,MPI_COMM_WORLD);
+    const clock_t e = clock();
+    if(rank==root) cout << "\ta2al:\t" << (e-s)/(double)CLOCKS_PER_SEC << endl;
 
     delete [] data;
     delete [] rlen;
@@ -769,7 +779,9 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
         ith2.set_pos(pos2);
 
         const clock_t s1=clock();
-        relation& currel_local=distribute_itf(*currel,ith1);
+        relation& currel_local=(i==1?
+                    distribute_loc(*currel,ith1)
+                    :distribute_itf(*currel,ith1));
         relation& next_local=distribute_loc(nextrel,ith2);
         const clock_t t1=clock();
         dt+=(t1-s1)/(double)CLOCKS_PER_SEC;
@@ -891,7 +903,91 @@ relation& relation::join_hc(vector<relation>&rs,vector<string>& patstrs){
     return join_hc(rs,pats,0);
 }
 
-//output function
+//int to string function (Internet)
+const char digit_pairs[201] = {
+  "00010203040506070809"
+  "10111213141516171819"
+  "20212223242526272829"
+  "30313233343536373839"
+  "40414243444546474849"
+  "50515253545556575859"
+  "60616263646566676869"
+  "70717273747576777879"
+  "80818283848586878889"
+  "90919293949596979899"
+};
+std::string& itostr(int n, std::string& s){
+    if(n==0)
+    {
+        s="0";
+        return s;
+    }
+
+    int sign = -(n<0);
+    unsigned int val = (n^sign)-sign;
+
+    int size;
+    if(val>=10000)
+    {
+        if(val>=10000000)
+        {
+            if(val>=1000000000)
+                size=10;
+            else if(val>=100000000)
+                size=9;
+            else
+                size=8;
+        }
+        else
+        {
+            if(val>=1000000)
+                size=7;
+            else if(val>=100000)
+                size=6;
+            else
+                size=5;
+        }
+    }
+    else
+    {
+        if(val>=100)
+        {
+            if(val>=1000)
+                size=4;
+            else
+                size=3;
+        }
+        else
+        {
+            if(val>=10)
+                size=2;
+            else
+                size=1;
+        }
+    }
+    size -= sign;
+    s.resize(size);
+    char* c = &s[0];
+    if(sign)
+        *c='-';
+
+    c += size-1;
+    while(val>=100)
+    {
+       int pos = val % 100;
+       val /= 100;
+       *(short*)(c-1)=*(short*)(digit_pairs+2*pos);
+       c-=2;
+    }
+    while(val>0)
+    {
+        *c--='0' + (val % 10);
+        val /= 10;
+    }
+    return s;
+}
+
+//output functions
 void relation::save(string filename){
     cout << "saving to " << filename << "..." << endl;
     ofstream file;
@@ -905,7 +1001,19 @@ void relation::save(string filename){
                 else file << "\n";
             }
         }
+        // string res;res.reserve(1000000000);
+        // string tmp;
+        // res += itostr(arity,tmp) + " " + itostr(memsize,tmp) + "\n";
+        // for(int i=0;i<memsize;i++){
+        //     for(int j=0;j<arity;j++){
+        //         res += itostr(members[i*arity+j],tmp);
+        //         if(j+1<arity) res += " ";
+        //         else res += "\n";
+        //     }
+        // }
+        // file << res;
         file.close();
+        cout << "save complete" << endl;
     }
     else cout << "Saving failure." << endl;
 }

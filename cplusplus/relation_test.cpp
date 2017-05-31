@@ -16,7 +16,10 @@ void performance_test(string dataset,
     MPI_Comm_size(MPI_COMM_WORLD,&size);
 
     vector<relation> rs(3,relation(dataset));
-    vector<string> strs;strs.push_back("(x,y)");strs.push_back("(y,z)");strs.push_back("(z,x)");
+    vector<string> strs;
+    strs.push_back("(x,y)");
+    strs.push_back("(y,z)");
+    strs.push_back("(z,x)");
 
     if(rank==root) {
         cout << "============================" << endl;
@@ -24,25 +27,25 @@ void performance_test(string dataset,
         cout << "\tnumproc: " << size << endl;
     }
 
-    if(rank==root) cout << "hybercube join algorithm..." << endl;
-    const clock_t t11 = clock();
-    relation hcr = relation::join_hc(rs,strs);
-    const clock_t t12 = clock();
-    if(rank==root)hcr.save(hc_output);
-    const clock_t t13 = clock();
+    // if(rank==root) cout << "hybercube join algorithm..." << endl;
+    // const clock_t t11 = clock();
+    // relation hcr = relation::join_hc(rs,strs);
+    // const clock_t t12 = clock();
+    // if(rank==root)hcr.save(hc_output);
+    // const clock_t t13 = clock();
 
-    // if(rank==root) cout << "instant-transfer join algorithm..." << endl;
-    // const clock_t t21 = clock();
-    // relation itfr = relation::join_itf(rs,strs);
-    // const clock_t t22 = clock();
-    // if(rank==root)itfr.save(itf_output);
-    // const clock_t t23 = clock();
+    if(rank==root) cout << "instant-transfer join algorithm..." << endl;
+    const clock_t t21 = clock();
+    relation itfr = relation::join_itf(rs,strs);
+    const clock_t t22 = clock();
+    if(rank==root)itfr.save(itf_output);
+    const clock_t t23 = clock();
 
     if(rank==root){
-        cout << (t12-t11)/(double)CLOCKS_PER_SEC << " for hypercube join"<< endl;
-        cout << (t13-t12)/(double)CLOCKS_PER_SEC << " for hypercube save"<< endl;
-        // cout << (t22-t21)/(double)CLOCKS_PER_SEC << " for instant-transfer join"<< endl;
-        // cout << (t23-t22)/(double)CLOCKS_PER_SEC << " for instant-transfer save"<< endl;
+        // cout << (t12-t11)/(double)CLOCKS_PER_SEC << " for hypercube join"<< endl;
+        // cout << (t13-t12)/(double)CLOCKS_PER_SEC << " for hypercube save"<< endl;
+        cout << (t22-t21)/(double)CLOCKS_PER_SEC << " for instant-transfer join"<< endl;
+        cout << (t23-t22)/(double)CLOCKS_PER_SEC << " for instant-transfer save"<< endl;
     }
 
     if(rank==root) {
