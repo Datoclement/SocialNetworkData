@@ -224,11 +224,11 @@ vector<int>& relation::hash_hc::get_value(int* v){
     return values[id];
 }
 
-//hash_itf class
-relation::hash_itf::hash_itf(int _sz):sz(_sz),r(_sz),pos(0){}
-void relation::hash_itf::set_pos(int _pos){pos=_pos;}
-void relation::hash_itf::evolve(){r++;}
-int relation::hash_itf::get_value(int* key){return key[pos]%r%sz;}
+//hash_mod class
+relation::hash_mod::hash_mod(int _sz):sz(_sz),r(_sz),pos(0){}
+void relation::hash_mod::set_pos(int _pos){pos=_pos;}
+void relation::hash_mod::evolve(){r++;}
+int relation::hash_mod::get_value(int* key){return key[pos]%r%sz;}
 
 //clean data function
 pair<relation,relation::pattern> relation::filter(pattern pat){
@@ -376,7 +376,7 @@ relation& relation::merge(relation& r,int root){
         return *new relation(res_vect,ar,nsz);
     }
 }
-relation& relation::distribute_loc(relation& r,hash_itf ith){
+relation& relation::distribute_loc(relation& r,hash_mod ith){
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
 
@@ -400,7 +400,7 @@ relation& relation::distribute_loc(relation& r,hash_itf ith){
 
     return *new relation(newmems,ar,nsz);
 }
-relation& relation::distribute_mpi(relation& r,int root,hash_itf ith){
+relation& relation::distribute_mpi(relation& r,int root,hash_mod ith){
     int rank,size;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
@@ -445,7 +445,7 @@ relation& relation::distribute_mpi(relation& r,int root,hash_itf ith){
 
     return *new relation(newmems,ar,len/ar);
 }
-relation& relation::distribute_itf(relation& r,hash_itf ith){
+relation& relation::distribute_itf(relation& r,hash_mod ith){
     int rank,size;int root=0;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
@@ -658,7 +658,7 @@ relation& relation::join_mpi(vector<relation>& rs,vector<pattern>& pats,int root
     relation* currel=&rs[0];
     pattern curpat=pats[0];
 
-    hash_itf ith1(size),ith2(size);
+    hash_mod ith1(size),ith2(size);
 
     for(int i=1;i<rs.size();i++){
 
@@ -718,7 +718,7 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
     relation* currel=&rs[0];
     pattern curpat=pats[0];
 
-    hash_itf ith1(size),ith2(size);
+    hash_mod ith1(size),ith2(size);
 
     for(int i=1;i<rs.size();i++){
 

@@ -126,18 +126,20 @@ private:
     };
 
     /**
-        hash class for instant-transfer algorithm
+        hash class for mod algorithm
     */
-    class hash_itf{
+    class hash_mod{
 
     private:
         int sz,r,pos;
 
     public:
-        hash_itf(int _sz);
+        hash_mod(int _sz);
 
+        //set the component position used in hash formula
         void set_pos(int _pos);
 
+        //augmenter r par 1
         void evolve();
 
         int get_value(int* key);
@@ -168,6 +170,9 @@ private:
     */
     static relation& join(relation& r1, relation& r2, pattern pat1,pattern pat2);
 
+    /**
+        bridge from public interface to core function
+    */
     static relation& join(vector<relation>& rs,vector<string>&strs,
             relation&(*join_func)(vector<relation>&,vector<pattern>&,int));
 
@@ -203,14 +208,23 @@ private:
     */
     static relation& merge(relation& r,int dest);
 
-    static relation& distribute_mpi(relation& r,int root,hash_itf ith);
+    /**
+        distribute (with no communication) the data the exist already
+        in every machine
+    */
+    static relation& distribute_loc(relation& r,hash_mod ith);
+
+    /**
+        distribute from root according to mod hash function
+    */
+    static relation& distribute_mpi(relation& r,int root,hash_mod ith);
     /**
         distribute intermedium result to corresponding processors
         essence of instant-transfer algorithm
         using MPI_Alltoall
         @param pos: pivot position that is taken into the hash function
     */
-    static relation& distribute_itf(relation& r,hash_itf ith);
+    static relation& distribute_itf(relation& r,hash_mod ith);
 
     /**
         distribute the raw data to corresponding processors
@@ -220,8 +234,6 @@ private:
         @param cbh : hash class (tuple->int)
     */
     static relation& distribute_hc(relation& r,hash_hc cbh);
-
-    static relation& distribute_loc(relation& r,hash_itf ith);
 
 public:
 
@@ -252,12 +264,12 @@ public:
     void random_seed(int seed);
 
     //return a random member
-    // vector<int> random();
     int* random();
 
     //save the relation into the given path
     void save(string filename);
 
+    //free memory of members and make relation an empty relation
     void free();
 
     //join several relations with strings that correspond to a pattern
