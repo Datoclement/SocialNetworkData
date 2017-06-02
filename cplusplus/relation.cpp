@@ -31,8 +31,6 @@
 }
 #endif
 
-// #define FLTR
-
 using namespace std;
 
 //constructor
@@ -356,14 +354,11 @@ relation& relation::merge(relation& r,int root){
         displ[0]=0;
         for(int i=1;i<size;i++)displ[i]=displ[i-1]+szv[i-1]*ar;
     }
-    int* res_vect=NULL;
-    if(rank==root){
-        res_vect=new int[nsz*ar];
-    }
+    int* res_vect=(nsz==0?NULL:new int[nsz*ar]);
+
     if(rank==root){
         for(int i=0;i<size;i++)szv[i]*=ar;
     }
-    // cout << rank << " waits for gather" << endl;
 
     const clock_t s = clock();
     MPI_Gatherv(r.members,sz*ar,MPI_INT,res_vect,szv,displ,MPI_INT,root,MPI_COMM_WORLD);
@@ -374,14 +369,81 @@ relation& relation::merge(relation& r,int root){
     delete [] arv;
     delete [] displ;
 
-    // cout << rank << " through gather" << endl;
-
     if(rank!=root) {
         return *new relation();
     }
     else{
         return *new relation(res_vect,ar,nsz);
     }
+}
+relation& relation::distribute_loc(relation& r,hash_itf ith){
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+
+    int ar=r.arity;
+
+    vector<int> idset;
+
+    for(int i=0;i<r.memsize;i++){
+        int v=ith.get_value(r.get(i));
+        if(v==rank)idset.push_back(i);
+    }
+
+    int nsz=idset.size();
+
+    int* newmems=(nsz==0?NULL:new int[nsz*ar]);
+    for(int i=0;i<nsz;i++){
+        for(int j=0;j<ar;j++){
+            newmems[i*ar+j]=r.get(idset[i])[j];
+        }
+    }
+
+    return *new relation(newmems,ar,nsz);
+}
+relation& relation::distribute_mpi(relation& r,int root,hash_itf ith){
+    int rank,size;
+    MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&size);
+    int ar=r.arity;
+    MPI_Bcast(&ar,1,MPI_INT,root,MPI_COMM_WORLD);
+    if(ar==0)return *new relation();
+    vector<vector<int> >ids(size);
+    for(int i=0;i<r.memsize;i++){
+        int hv=ith.get_value(r.get(i));
+        ids[hv].push_back(i);
+    }
+    int* lenv=new int[size];
+    for(int i=0;i<size;i++){
+        lenv[i]=ids[i].size()*ar;
+    }
+    int len;
+    MPI_Scatter(lenv,1,MPI_INT,&len,1,MPI_INT,root,MPI_COMM_WORLD);
+    int* disp=new int[size];
+    disp[0]=0;
+    for(int i=1;i<size;i++){
+        disp[i]=disp[i-1]+lenv[i-1];
+    }
+
+    int* data=NULL;
+    if(rank==root){
+        data=new int[r.arity*r.memsize];
+        for(int i=0;i<size;i++){
+            for(int j=0;j<ids[i].size();j++){
+                for(int k=0;k<ar;k++){
+                    data[disp[i]+j*r.arity+k]=r.get(ids[i][j])[k];
+                }
+            }
+        }
+    }
+
+    int* newmems=(len==0?NULL:new int[len]);
+    MPI_Scatterv(data,lenv,disp,MPI_INT,newmems,len,MPI_INT,root,MPI_COMM_WORLD);
+
+    delete [] data;
+    delete [] lenv;
+    delete [] disp;
+
+    return *new relation(newmems,ar,len/ar);
 }
 relation& relation::distribute_itf(relation& r,hash_itf ith){
     int rank,size;int root=0;
@@ -418,7 +480,6 @@ relation& relation::distribute_itf(relation& r,hash_itf ith){
     rdis[0]=0;
     for(int i=1;i<size;i++)rdis[i]=rdis[i-1]+rlen[i-1];
 
-
     //slim data
     int* ipos=new int[size];
     for(int i=0;i<size;i++)ipos[i]=0;
@@ -449,95 +510,7 @@ relation& relation::distribute_itf(relation& r,hash_itf ith){
     return *new relation(collect,ar,ttl/ar);
 
 }
-relation& relation::distribute_loc(relation& r,hash_itf ith){
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD,&rank);
-
-    int ar=r.arity;
-
-    vector<int> idset;
-
-    for(int i=0;i<r.memsize;i++){
-        int v=ith.get_value(r.get(i));
-        if(v==rank)idset.push_back(i);
-    }
-
-    int nsz=idset.size();
-
-    int* newmems=new int[nsz*ar];
-    for(int i=0;i<nsz;i++){
-        for(int j=0;j<ar;j++){
-            newmems[i*ar+j]=r.get(idset[i])[j];
-        }
-    }
-
-    return *new relation(newmems,ar,nsz);
-}
-relation& relation::distribute_hc(relation& r,int root,hash_hc cbh){
-
-    int rank,size;
-    MPI_Comm_rank(MPI_COMM_WORLD,&rank);
-    MPI_Comm_size(MPI_COMM_WORLD,&size);
-
-
-    int l=r.memsize;
-    MPI_Bcast(&l,1,MPI_INT,root,MPI_COMM_WORLD);
-    int ar=r.arity;
-    MPI_Bcast(&ar,1,MPI_INT,root,MPI_COMM_WORLD);
-
-    //single source
-
-    int* lenv=new int[size];
-    for(int i=0;i<size;i++)lenv[i]=0;
-    int* thresv=new int[size];
-
-    if(rank==root){
-        for(int i=0;i<r.memsize;i++){
-            vector<int> cur=cbh.get_value(r.get(i));
-            // print_array1d(cur);
-            for(int j=0;j<cur.size();j++){
-                lenv[cur[j]]+=ar;
-            }
-        }
-        thresv[0]=0;
-        for(int i=1;i<size;i++)thresv[i]=thresv[i-1]+lenv[i-1];
-    }
-
-    int len;
-    MPI_Scatter(lenv,1,MPI_INT,&len,1,MPI_INT,root,MPI_COMM_WORLD);
-
-    int* pos=new int[size];
-    for(int i=0;i<size;i++)pos[i]=0;
-
-    int* data=NULL;
-    if(rank==root){
-
-        int ttl=thresv[size-1]+lenv[size-1];
-        data=new int[ttl];
-        for(int i=0;i<r.memsize;i++){
-            vector<int> cur=cbh.get_value(r.get(i));
-            for(int j=0;j<cur.size();j++){
-                int curid=cur[j];
-                int curpos=thresv[curid]+pos[curid];
-                pos[curid]+=ar;
-                for(int k=0;k<ar;k++){
-                    data[curpos+k]=r.get(i)[k];
-                }
-            }
-        }
-
-    }
-    int* collect=new int[len];
-    MPI_Scatterv(data,lenv,thresv,MPI_INT,collect,len,MPI_INT,root,MPI_COMM_WORLD);
-
-    delete [] lenv;
-    delete [] thresv;
-    delete [] pos;
-    delete [] data;
-
-    return *new relation(collect,ar,len/ar);
-}
-relation& relation::distribute_hc_loc(relation& r,hash_hc cbh){
+relation& relation::distribute_hc(relation& r,hash_hc cbh){
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
 
@@ -567,6 +540,7 @@ relation& relation::distribute_hc_loc(relation& r,hash_hc cbh){
     return *new relation(newmems,ar,nsz);
 }
 
+//get hash_hc distribution
 vector<int> get_distribution(int size,int vars){
     vector<int> res(vars);
     for(int i=0;i<vars-1;i++){
@@ -602,15 +576,18 @@ relation& relation::join(relation& r1,relation& r2,pattern _pat1,pattern _pat2){
     if(r1.memsize==0||r2.memsize==0)return * new relation();
     pair<relation,relation::pattern> pa1 = r1.filter(_pat1),pa2 = r2.filter(_pat2);
     relation& f1 = pa1.first, f2 = pa2.first;
+    int* memory_manager1=f1.members;
+    int* memory_manager2=f2.members;
     pattern pat1 = pa1.second, pat2 = pa2.second;
     vector<string> comm = pattern::find_comm(pat1,pat2);
     vector<vector<int> > perms = pattern::find_perm(pat1,pat2);
     map<string,bool> is_commun;
     for(int i=0;i<comm.size();i++)is_commun[comm[i]]=true;
-
     pattern p = pattern::join(pat1,pat2);
     f1.sort(perms[0]); f2.sort(perms[1]);
 
+    delete [] memory_manager1;
+    delete [] memory_manager2;
     //TODO: the algorithm
     vector<vector<int> > idset;
     int p1=0,p2=0,l=comm.size();
@@ -639,7 +616,7 @@ relation& relation::join(relation& r1,relation& r2,pattern _pat1,pattern _pat2){
 
     int newar=f1.arity+f2.arity-comm.size();
     int newsize=idset.size();
-    int* newmems=new int[newar*newsize];
+    int* newmems=(newsize==0?NULL:new int[newar*newsize]);
     for(int i=0;i<newsize;i++){
         int p1=idset[i][0];
         int p2=idset[i][1];
@@ -653,72 +630,80 @@ relation& relation::join(relation& r1,relation& r2,pattern _pat1,pattern _pat2){
             pos++;
         }
     }
+    delete [] f1.members;
+    delete [] f2.members;
     return *new relation(newmems,newar,newsize);
 }
-relation& relation::join(vector<relation>& rs,vector<pattern>& pats){
+relation& relation::join_seq(vector<relation>& rs,vector<pattern>& pats,int root){
     if(rs.size()==0)return *new relation();
     relation *res=&rs[0];
     pattern pat = pats[0];
     for(int i=1;i<rs.size();i++){
-        *res = join(*res,rs[i],pat,pats[i]);
+        relation& tmp=join(*res,rs[i],pat,pats[i]);
+        if(i>1)delete [] res->members;
+        res=&tmp;
         pat = pattern::join(pat,pats[i]);
     }
     return *res;
 }
-relation& relation::join_mpi(relation& r1,relation& r2,
-        pattern _pat1, pattern _pat2){
-    int id, size; int root = 0;
-    MPI_Comm_rank(MPI_COMM_WORLD,&id);
+relation& relation::join_mpi(vector<relation>& rs,vector<pattern>& pats,int root){
+    int rank,size;
+    MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
-    pair<relation,relation::pattern> p1 = r1.filter(_pat1),p2 = r2.filter(_pat2);
-    relation &f1 = p1.first, &f2 = p2.first;
-    pattern pat1 = p1.second, pat2 = p2.second;
-    vector<string> comm = pattern::find_comm(pat1,pat2);
-    vector<int> id1,id2;
-    int pos1=pat1.positions[comm[0]][0];
-    int pos2=pat2.positions[comm[0]][0];
 
-    for (int i=0; i<f1.memsize;i++){
-        if (f1.get(i)[pos1]%size==id){
-            id1.push_back(i);
-        }
-    }
-    for (int i=0; i<f2.memsize;i++){
-        if (f2.get(i)[pos2]%size==id){
-            id2.push_back(i);
-        }
-    }
-    int l1=id1.size(),l2=id2.size();
-    int* mem1=new int[l1*f1.arity];
-    for(int i=0;i<l1;i++){
-        for(int j=0;j<f1.arity;j++){
-            mem1[i*f1.arity+j]=f1.get(id1[i])[j];
-        }
-    }
-    int* mem2=new int[l2*f2.arity];
-    for(int i=0;i<l2;i++){
-        for(int j=0;j<f2.arity;j++){
-            mem2[i*f2.arity+j]=f2.get(id2[i])[j];
-        }
-    }
-    relation &tmp1=*new relation(mem1,f1.arity,l1),&tmp2=*new relation(mem2,f2.arity,l2);
-    relation &local= join(tmp1,tmp2,pat1,pat2);
+    if(rs.size()==0)return *new relation();
 
-    int len=local.memsize*local.arity;
-    int* lenv=new int[size];
-    MPI_Gather(&len,1,MPI_INT,lenv,1,MPI_INT,root,MPI_COMM_WORLD);
-    int* disv=new int[size];
-    disv[0]=0;for(int i=1;i<size;i++)disv[i]=disv[i-1]+lenv[i-1];
-    int resl=disv[size-1]+lenv[size-1];
-    int* newmems=new int[resl];
-    MPI_Gatherv(local.members,len,MPI_INT,newmems,lenv,disv,MPI_INT,root,MPI_COMM_WORLD);
-    delete [] lenv;
-    delete [] disv;
-    if(id!=root)return *new relation();
-    else{
-        int ar=f1.arity+f2.arity-comm.size();
-        return *new relation(newmems,ar,resl/ar);
+    double ft=0,dt=0,jt=0,mt=0;
+
+    relation* currel=&rs[0];
+    pattern curpat=pats[0];
+
+    hash_itf ith1(size),ith2(size);
+
+    for(int i=1;i<rs.size();i++){
+
+        relation& nextrel=rs[i];
+        pattern nextpat=pats[i];
+
+        vector<string> comm=pattern::find_comm(curpat,nextpat);
+        int pos1=curpat.positions[comm[0]][0];
+        int pos2=nextpat.positions[comm[0]][0];
+
+        ith1.set_pos(pos1);
+        ith2.set_pos(pos2);
+
+        const clock_t s1=clock();
+        relation& currel_local=(i==1?
+                    distribute_loc(*currel,ith1)
+                    :distribute_mpi(*currel,root,ith1));
+        relation& next_local=distribute_loc(nextrel,ith2);
+        const clock_t t1=clock();
+        dt+=(t1-s1)/(double)CLOCKS_PER_SEC;
+        if(i>1) delete [] (currel->members);
+        const clock_t s2=clock();
+        currel=&join(currel_local,next_local,curpat,nextpat);
+        const clock_t t2=clock();
+        jt+=(t2-s2)/(double)CLOCKS_PER_SEC;
+
+        delete [] currel_local.members;
+        delete [] next_local.members;
+
+        const clock_t s3=clock();
+        relation& tmp=merge(*currel,root);
+        delete [] (currel->members);
+        currel=&tmp;
+        const clock_t t3=clock();
+        mt+=(t3-s3)/(double)CLOCKS_PER_SEC;
+        curpat=relation::pattern::join(curpat,nextpat);
+
+        // ith1.evolve();
+        // ith2.evolve();
     }
+
+    if(rank==root)cout << "\tdtrb:\t" << dt << endl;
+    if(rank==root)cout << "\tjoin:\t" << jt << endl;
+    if(rank==root)cout << "\tmrge:\t" << mt << endl;
+    return *currel;
 }
 relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root){
 
@@ -726,50 +711,19 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
 
-    bool quick_return=false;
-    if(rank==root&&rs.size()==0){
-        quick_return=true;
-        MPI_Bcast(&quick_return,1,MPI_INT,root,MPI_COMM_WORLD);
-    }
-    if(quick_return)return *new relation();
+    if(rs.size()==0)return *new relation();
 
     double ft=0,dt=0,jt=0,mt=0;
 
-    #ifdef FLTR
-
-    const clock_t s0=clock();
-    pair<relation,relation::pattern> p=rs[0].filter(pats[0]);
-    const clock_t t0=clock();
-    ft+=(t0-s0)/(double)CLOCKS_PER_SEC;
-    relation* currel=&p.first;
-    pattern curpat=p.second;
-
-    #else
-
     relation* currel=&rs[0];
     pattern curpat=pats[0];
-
-    #endif
 
     hash_itf ith1(size),ith2(size);
 
     for(int i=1;i<rs.size();i++){
 
-        #ifdef FLTR
-
-        const clock_t s0=clock();
-        pair<relation,relation::pattern> p=rs[i].filter(pats[i]);
-        const clock_t t0=clock();
-        ft+=(t0-s0)/(double)CLOCKS_PER_SEC;
-        relation& nextrel=p.first;
-        pattern nextpat=p.second;
-
-        #else
-
         relation& nextrel=rs[i];
         pattern nextpat=pats[i];
-
-        #endif
 
         vector<string> comm=pattern::find_comm(curpat,nextpat);
         int pos1=curpat.positions[comm[0]][0];
@@ -786,10 +740,15 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
         const clock_t t1=clock();
         dt+=(t1-s1)/(double)CLOCKS_PER_SEC;
 
+        if(i>1) delete [] currel->members;
+
         const clock_t s2=clock();
         currel=&join(currel_local,next_local,curpat,nextpat);
         const clock_t t2=clock();
         jt+=(t2-s2)/(double)CLOCKS_PER_SEC;
+
+        delete [] currel_local.members;
+        delete [] next_local.members;
 
         curpat=relation::pattern::join(curpat,nextpat);
 
@@ -801,11 +760,7 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
     const clock_t t3=clock();
     mt+=(t3-s3)/(double)CLOCKS_PER_SEC;
 
-    #ifdef FLTR
-
-    if(rank==root)cout << "\tfltr:\t" << ft << endl;
-
-    #endif
+    if(rs.size()>1) delete [] currel->members;
 
     if(rank==root)cout << "\tdtrb:\t" << dt << endl;
     if(rank==root)cout << "\tjoin:\t" << jt << endl;
@@ -813,34 +768,13 @@ relation& relation::join_itf(vector<relation>& rs,vector<pattern>& pats,int root
 
     return res;
 }
-relation& relation::join_hc(vector<relation>&_rs,vector<pattern>&_pats,int root){
+relation& relation::join_hc(vector<relation>& rs,vector<pattern>& pats,int root){
 
-    if(_rs.size()==0)return *new relation();
+    if(rs.size()==0)return *new relation();
 
     int rank,size;
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&size);
-
-    #ifdef FLTR
-
-    vector<relation> rs;
-    vector<pattern> pats;
-    const clock_t s0=clock();
-    for(int i=0;i<_rs.size();i++){
-        pair<relation,pattern> p=_rs[i].filter(_pats[i]);
-        rs.push_back(p.first);
-        pats.push_back(p.second);
-    }
-    const clock_t t0=clock();
-    if(rank==root)
-        cout << "\tfltr:\t" << (t0-s0)/(double)CLOCKS_PER_SEC << endl;
-
-    #else
-
-    vector<relation>& rs=_rs;
-    vector<pattern>& pats=_pats;
-
-    #endif
 
     vector<string> comms=pattern::find_comm(pats);
     vector<int> ms=get_distribution(size,comms.size());
@@ -852,15 +786,14 @@ relation& relation::join_hc(vector<relation>&_rs,vector<pattern>&_pats,int root)
     vector<relation>& rs_loc=*new vector<relation>();
 
     const clock_t s1=clock();
-    // for(int i=0;i<rs.size();i++)rs_loc.push_back(distribute_hc(rs[i],root,cbh[i]));
-    for(int i=0;i<rs.size();i++)rs_loc.push_back(distribute_hc_loc(rs[i],cbh[i]));
+    for(int i=0;i<rs.size();i++)rs_loc.push_back(distribute_hc(rs[i],cbh[i]));
     const clock_t t1=clock();
 
     if(rank==root)
         cout << "\tdtrb:\t" << (t1-s1)/(double)CLOCKS_PER_SEC << endl;
 
     const clock_t s2=clock();
-    relation& res_loc=join(rs_loc,pats);
+    relation& res_loc=join_seq(rs_loc,pats,rank);
     const clock_t t2=clock();
     if(rank==root)
         cout << "\tjoin:\t" << (t2-s2)/(double)CLOCKS_PER_SEC << endl;
@@ -868,6 +801,12 @@ relation& relation::join_hc(vector<relation>&_rs,vector<pattern>&_pats,int root)
     const clock_t s3=clock();
     relation& res=merge(res_loc,root);
     const clock_t t3=clock();
+
+    for(int i=0;i<rs_loc.size();i++){
+        delete [] rs_loc[i].members;
+    }
+    delete [] res_loc.members;
+
     if(rank==root)
         cout << "\tmrge:\t" << (t3-s3)/(double)CLOCKS_PER_SEC << endl;
 
@@ -875,121 +814,41 @@ relation& relation::join_hc(vector<relation>&_rs,vector<pattern>&_pats,int root)
 }
 
 //public interface function
-relation& relation::join(relation& r1,relation& r2,string patstr1,string patstr2){
-    return relation::join(r1,r2,*new pattern(patstr1),*new pattern(patstr2));
-}
-relation& relation::join(vector<relation>& rs,vector<string>& patstrs){
+relation& relation::join(vector<relation>& rs,vector<string>&strs,
+        relation&(*join_func)(vector<relation>&,vector<pattern>&,int)){
     if(rs.size()==1)return *new relation();
-    vector<pattern> pats;
-    for(int i=0;i<patstrs.size();i++){
-        pats.push_back(pattern(patstrs[i]));
+    vector<pattern> pats=*new vector<pattern>();
+    for(int i=0;i<strs.size();i++){
+        pats.push_back(pattern(strs[i]));
     }
-    return join(rs,pats);
+    return join_func(rs,pats,0);
 }
-relation& relation::join_mpi(relation& r1,relation& r2,string patstr1,string patstr2){
-    return join_mpi(r1,r2,pattern(patstr1),pattern(patstr2));
+relation& relation::join_seq(vector<relation>& rs,vector<string>& strs){
+    return join(rs,strs,static_cast<relation&(*)(
+            vector<relation>&,vector<pattern>&,int)>(&join_seq));
+}
+relation& relation::join_mpi(vector<relation>& rs,vector<string>& strs){
+    return join(rs,strs,static_cast<relation&(*)(
+            vector<relation>&,vector<pattern>&,int)>(&join_mpi));
 }
 relation& relation::join_itf(vector<relation>&rs,vector<string>& strs){
-    vector<pattern> pats;
-    for(int i=0;i<strs.size();i++)
-        pats.push_back(pattern(strs[i]));
-    return relation::join_itf(rs,pats,0);
+    return join(rs,strs,static_cast<relation&(*)(
+            vector<relation>&,vector<pattern>&,int)>(&join_itf));
 }
-relation& relation::join_hc(vector<relation>&rs,vector<string>& patstrs){
-    vector<pattern> pats;
-    for(int i=0;i<patstrs.size();i++){
-        pats.push_back(pattern(patstrs[i]));
-    }
-    return join_hc(rs,pats,0);
+relation& relation::join_hc(vector<relation>&rs,vector<string>& strs){
+    return join(rs,strs,static_cast<relation&(*)(
+            vector<relation>&,vector<pattern>&,int)>(&join_hc));
 }
 
-//int to string function (Internet)
-const char digit_pairs[201] = {
-  "00010203040506070809"
-  "10111213141516171819"
-  "20212223242526272829"
-  "30313233343536373839"
-  "40414243444546474849"
-  "50515253545556575859"
-  "60616263646566676869"
-  "70717273747576777879"
-  "80818283848586878889"
-  "90919293949596979899"
-};
-std::string& itostr(int n, std::string& s){
-    if(n==0)
-    {
-        s="0";
-        return s;
-    }
-
-    int sign = -(n<0);
-    unsigned int val = (n^sign)-sign;
-
-    int size;
-    if(val>=10000)
-    {
-        if(val>=10000000)
-        {
-            if(val>=1000000000)
-                size=10;
-            else if(val>=100000000)
-                size=9;
-            else
-                size=8;
-        }
-        else
-        {
-            if(val>=1000000)
-                size=7;
-            else if(val>=100000)
-                size=6;
-            else
-                size=5;
-        }
-    }
-    else
-    {
-        if(val>=100)
-        {
-            if(val>=1000)
-                size=4;
-            else
-                size=3;
-        }
-        else
-        {
-            if(val>=10)
-                size=2;
-            else
-                size=1;
-        }
-    }
-    size -= sign;
-    s.resize(size);
-    char* c = &s[0];
-    if(sign)
-        *c='-';
-
-    c += size-1;
-    while(val>=100)
-    {
-       int pos = val % 100;
-       val /= 100;
-       *(short*)(c-1)=*(short*)(digit_pairs+2*pos);
-       c-=2;
-    }
-    while(val>0)
-    {
-        *c--='0' + (val % 10);
-        val /= 10;
-    }
-    return s;
+//free memory function
+void relation::free(){
+    arity=memsize=0;
+    delete [] members;
+    members=NULL;
 }
 
 //output functions
 void relation::save(string filename){
-    cout << "saving to " << filename << "..." << endl;
     ofstream file;
     file.open(("../output/"+filename).c_str());
     if(file.is_open()){
@@ -1001,19 +860,7 @@ void relation::save(string filename){
                 else file << "\n";
             }
         }
-        // string res;res.reserve(1000000000);
-        // string tmp;
-        // res += itostr(arity,tmp) + " " + itostr(memsize,tmp) + "\n";
-        // for(int i=0;i<memsize;i++){
-        //     for(int j=0;j<arity;j++){
-        //         res += itostr(members[i*arity+j],tmp);
-        //         if(j+1<arity) res += " ";
-        //         else res += "\n";
-        //     }
-        // }
-        // file << res;
         file.close();
-        cout << "save complete" << endl;
     }
     else cout << "Saving failure." << endl;
 }

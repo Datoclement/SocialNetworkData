@@ -23,7 +23,6 @@ private:
         vector<int> permutation;
         cmp(int arity);
         cmp(vector<int> _perm);
-        // bool operator()(vector<int> a,vector<int> b)const;
         bool operator()(int* a,int* b)const;
     };
 
@@ -126,6 +125,9 @@ private:
         vector<int>& get_value(int* v);
     };
 
+    /**
+        hash class for instant-transfer algorithm
+    */
     class hash_itf{
 
     private:
@@ -166,17 +168,20 @@ private:
     */
     static relation& join(relation& r1, relation& r2, pattern pat1,pattern pat2);
 
+    static relation& join(vector<relation>& rs,vector<string>&strs,
+            relation&(*join_func)(vector<relation>&,vector<pattern>&,int));
+
     /**
         join several relations according to the given patterns
         implemented with a loop re-using simple 2-join
     */
-    static relation& join(vector<relation>& rs,vector<pattern>& pats);
+    static relation& join_seq(vector<relation>& rs,vector<pattern>& pats,int root);
 
     /**
-        join two relations according to the given patterns
+        join relations according to the given patterns
         implemented with naive algorithm with mpi
     */
-    static relation& join_mpi(relation& r1, relation& r2, pattern p1, pattern p2);
+    static relation& join_mpi(vector<relation>& rs,vector<pattern>& pats,int root);
 
     /**
         join several relations
@@ -198,6 +203,7 @@ private:
     */
     static relation& merge(relation& r,int dest);
 
+    static relation& distribute_mpi(relation& r,int root,hash_itf ith);
     /**
         distribute intermedium result to corresponding processors
         essence of instant-transfer algorithm
@@ -213,10 +219,9 @@ private:
         @param root: the root machine that has access to the raw data
         @param cbh : hash class (tuple->int)
     */
-    static relation& distribute_hc(relation& r,int root,hash_hc cbh);
+    static relation& distribute_hc(relation& r,hash_hc cbh);
 
     static relation& distribute_loc(relation& r,hash_itf ith);
-    static relation& distribute_hc_loc(relation&r,hash_hc cbh);
 
 public:
 
@@ -253,19 +258,18 @@ public:
     //save the relation into the given path
     void save(string filename);
 
-    //join two relations with two strings that correspond to a pattern
-    static relation& join(relation& r1, relation& r2, string patstr1, string patstr2);
+    void free();
 
     //join several relations with strings that correspond to a pattern
-    static relation& join(vector<relation>& rs,vector<string>& patstrs);
+    static relation& join_seq(vector<relation>& rs,vector<string>& patstrs);
 
-    //join two relations with mpi
-    static relation& join_mpi(relation& r1, relation& r2, string patstr1, string patstr2);
+    //join several relations with naive algo
+    static relation& join_mpi(vector<relation>& rs,vector<string>& patstrs);
 
     //join several relations with itf algo
     static relation& join_itf(vector<relation>& rs,vector<string>& patstrs);
 
     //join several relation with hc algo
-    static relation& join_hc(vector<relation>& rs, vector<string>& pats);
+    static relation& join_hc(vector<relation>& rs, vector<string>& patstrs);
 
 };
